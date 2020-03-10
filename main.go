@@ -16,8 +16,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// Version is the current version, in format major.minor.patch
+const Version = "1.1.0"
+
 var token string
 var guildTickers map[string](chan bool)
+var guildTimers map[string]time.Duration
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
@@ -34,6 +38,7 @@ func main() {
 
 	rand.Seed(time.Now().UnixNano())
 	guildTickers = make(map[string](chan bool))
+	guildTimers = make(map[string]time.Duration)
 
 	dg.AddHandler(messageCreate)
 
@@ -74,6 +79,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				return
 			}
 			go startPinTicker(s, m.GuildID, dur)
+			guildTimers[m.GuildID] = dur
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Pin Boi started! Running every `%s`.", dur.String()))
 		} else {
 			s.ChannelMessageSend(m.ChannelID, "Pin Boi already running!")
@@ -84,8 +90,20 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		} else {
 			done <- true
 			delete(guildTickers, m.GuildID)
+			delete(guildTimers, m.GuildID)
 			s.ChannelMessageSend(m.ChannelID, "Pin Boi stopped!")
 		}
+	} else if m.Content == "!pinboi status" {
+		_, running := guildTickers[m.GuildID]
+		duration, ok := guildTimers[m.GuildID]
+		if !ok {
+			duration = time.Duration(0)
+		}
+		s.ChannelMessageSend(m.ChannelID,
+			fmt.Sprintf(`**Pin Boi Status Info**
+Version: %s
+Currently running: %v
+Time between posting: %s`, Version, running, duration.String()))
 	} else if strings.HasPrefix(m.Content, "!pinboi") {
 		s.ChannelMessageSend(m.ChannelID,
 			"Pin Boi is a bot to periodically repost pinned messages.\n"+
@@ -93,7 +111,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				"`!pinboi start 12h`: Starts the bot, if not started already. Can use hours, minutes, etc for time.\n"+
 				"`!pinboi stop`: Stops the bot, if not stopped already.\n"+
 				"`!pinboi help`: Displays this message.\n"+
-				"`!pinboi status`: TODO")
+				"`!pinboi status`: Display version, current timeout, and if running.")
 	}
 
 }
