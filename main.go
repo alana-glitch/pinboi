@@ -146,9 +146,10 @@ func getMessageEcho(s *discordgo.Session, loc messageLocation) (*discordgo.Messa
 		return &echo, fmt.Errorf("getting creation time: %w", err)
 	} else {
 		dtime := DDate.TimeToDTime(created)
-		echo.Content = fmt.Sprintf("`Written %s by %s`\n%s",
+		echo.Content = fmt.Sprintf("`Written %s by %s`\n%s\n%s",
 			fmt.Sprintf("%s %d, %d YOLD", dtime.Season, dtime.Day, dtime.Year),
 			msg.Author.String(),
+			loc.Link(),
 			msg.Content,
 		)
 
@@ -170,7 +171,11 @@ func getMessageEcho(s *discordgo.Session, loc messageLocation) (*discordgo.Messa
 }
 
 type messageLocation struct {
-	ChannelID, MessageID string
+	GuildID, ChannelID, MessageID string
+}
+
+func (loc messageLocation) Link() string {
+	return fmt.Sprintf("https://discordapp.com/channels/%s/%s/%s", loc.GuildID, loc.ChannelID, loc.MessageID)
 }
 
 func randomPinnedAll(s *discordgo.Session, guildID string) (messageLocation, error) {
@@ -194,5 +199,5 @@ func randomPinnedAll(s *discordgo.Session, guildID string) (messageLocation, err
 	}
 
 	selected := pins[rand.Intn(len(pins))]
-	return messageLocation{ChannelID: selected.ChannelID, MessageID: selected.ID}, nil
+	return messageLocation{GuildID: guildID, ChannelID: selected.ChannelID, MessageID: selected.ID}, nil
 }
