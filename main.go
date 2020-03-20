@@ -16,8 +16,10 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// TODO truncate
+
 // Version is the current version, in format major.minor.patch
-const Version = "1.2.0"
+const Version = "1.3.0"
 
 type guildPins struct {
 	RefreshAt time.Time
@@ -74,7 +76,7 @@ func creationTime(ID string) (t time.Time, err error) {
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author.ID == s.State.User.ID {
+	if m.Author.ID == s.State.User.ID || !strings.HasPrefix(m.Content, "!pinboi") {
 		return
 	}
 
@@ -91,7 +93,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			guildTimers[m.GuildID] = dur
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Pin Boi started! Running every `%s`.", dur.String()))
 		}
-
 	} else if m.Content == "!pinboi fetch" {
 		if msgLoc, err := randomPinnedAll(s, m.GuildID); err != nil {
 			fmt.Printf("Error getting random pinned message: %s\n", err)
@@ -109,17 +110,32 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			delete(guildTimers, m.GuildID)
 			s.ChannelMessageSend(m.ChannelID, "Pin Boi stopped!")
 		}
+	} else if m.Content == "!pinboi refresh" {
+		if err := refreshPinCache(s, m.GuildID); err != nil {
+			fmt.Printf("Error refreshing pins: %s\n", err)
+			s.ChannelMessageSend(m.ChannelID, "500 internal server error")
+		} else {
+			s.ChannelMessageSend(m.ChannelID, "Pin Boi refreshed!")
+		}
 	} else if m.Content == "!pinboi status" {
 		_, running := guildTickers[m.GuildID]
 		duration, ok := guildTimers[m.GuildID]
 		if !ok {
 			duration = time.Duration(0)
 		}
+		pinCount := 0
+		pins, ok := guildPinCache[m.GuildID]
+		if ok {
+			pinCount = len(pins.Pins)
+		}
+
 		s.ChannelMessageSend(m.ChannelID,
 			fmt.Sprintf(`**Pin Boi Status Info**
 Version: %s
 Currently running: %v
-Time between posting: %s`, Version, running, duration.String()))
+Time between posting: %s
+Pin count (+/- 12h): %v`,
+				Version, running, duration.String(), pinCount))
 	} else if strings.HasPrefix(m.Content, "!pinboi") {
 		s.ChannelMessageSend(m.ChannelID,
 			"Pin Boi is a bot to periodically repost pinned messages.\n"+
@@ -128,7 +144,8 @@ Time between posting: %s`, Version, running, duration.String()))
 				"`!pinboi stop`: Stops the bot, if not stopped already.\n"+
 				"`!pinboi fetch`: Fetch a random pin, now. Does not affect timer.\n"+
 				"`!pinboi help`: Displays this message.\n"+
-				"`!pinboi status`: Display version, current timeout, and if running.")
+				"`!pinboi refresh`: Hard refresh cache.\n"+
+				"`!pinboi status`: Display version, current timeout, pin count, and if running.")
 	}
 
 }
@@ -198,31 +215,38 @@ func (loc messageLocation) Link() string {
 	return fmt.Sprintf("https://discordapp.com/channels/%s/%s/%s", loc.GuildID, loc.ChannelID, loc.MessageID)
 }
 
+func refreshPinCache(s *discordgo.Session, guildID string) error {
+	channels, err := s.GuildChannels(guildID)
+	if err != nil {
+		return fmt.Errorf("getting channels: %w", err)
+	}
+	guildPinInfo := guildPins{}
+	pins := []*discordgo.Message{}
+	for _, channel := range channels {
+		fmt.Printf("Scanning channel %s\n", channel.Name)
+		if channel.Type != discordgo.ChannelTypeGuildText {
+			fmt.Printf("Passing over\n")
+			continue
+		}
+		channelPins, err := s.ChannelMessagesPinned(channel.ID)
+		if err != nil {
+			return fmt.Errorf("getting channel pins: %w", err)
+		}
+		pins = append(pins, channelPins...)
+		time.Sleep(time.Second)
+	}
+	guildPinInfo.Pins = pins
+	guildPinInfo.RefreshAt = time.Now().Add(12 * time.Hour)
+	guildPinCache[guildID] = guildPinInfo
+	return nil
+}
+
 func randomPinnedAll(s *discordgo.Session, guildID string) (messageLocation, error) {
 	guildPinInfo, ok := guildPinCache[guildID]
 	if !ok || guildPinInfo.RefreshAt.Before(time.Now()) {
-
-		channels, err := s.GuildChannels(guildID)
-		if err != nil {
-			return messageLocation{}, fmt.Errorf("getting channels: %w", err)
+		if err := refreshPinCache(s, guildID); err != nil {
+			return messageLocation{}, err
 		}
-		pins := []*discordgo.Message{}
-		for _, channel := range channels {
-			fmt.Printf("Scanning channel %s\n", channel.Name)
-			if channel.Type != discordgo.ChannelTypeGuildText {
-				fmt.Printf("Passing over\n")
-				continue
-			}
-			channelPins, err := s.ChannelMessagesPinned(channel.ID)
-			if err != nil {
-				return messageLocation{}, fmt.Errorf("getting channel pins: %s", err)
-			}
-			pins = append(pins, channelPins...)
-			time.Sleep(time.Second)
-		}
-		guildPinInfo.Pins = pins
-		guildPinInfo.RefreshAt = time.Now().Add(12 * time.Hour)
-		guildPinCache[guildID] = guildPinInfo
 	}
 
 	pins := guildPinCache[guildID].Pins
