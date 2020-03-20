@@ -19,7 +19,7 @@ import (
 // TODO truncate
 
 // Version is the current version, in format major.minor.patch
-const Version = "1.3.0"
+const Version = "1.3.1"
 
 type guildPins struct {
 	RefreshAt time.Time
@@ -189,6 +189,11 @@ func getMessageEcho(s *discordgo.Session, loc messageLocation) (*discordgo.Messa
 			loc.Link(),
 			msg.Content,
 		)
+		// Discord has a length limit of 2000 characters.
+		// I don't trust that they use the same measure of length as go.
+		if len(echo.Content) > 1900 {
+			echo.Content = fmt.Sprintf("%.1899s…", echo.Content)
+		}
 
 		if len(msg.Attachments) > 0 {
 			resp, err := http.Get(msg.Attachments[0].URL)
